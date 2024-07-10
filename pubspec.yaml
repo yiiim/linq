@@ -1,6 +1,6 @@
 name: linq
 description: Operate the database using the Dart language without writing SQL.
-version: 1.0.0-dev.1
+version: 1.0.0-dev.2
 repository: https://github.com/yiiim/linq
 homepage: https://github.com/yiiim/linq
 
