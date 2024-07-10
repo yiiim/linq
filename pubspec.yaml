@@ -1,13 +1,15 @@
 name: linq
-description: A starting point for Dart libraries or applications.
+description: Operate the database using the Dart language without writing SQL.
 version: 1.0.0-dev.1
-# repository: https://github.com/my_org/my_repo
+repository: https://github.com/yiiim/linq
+homepage: https://github.com/yiiim/linq
+
 
 environment:
   sdk: ^3.0.0
-# Add regular dependencies here.
+
 dependencies:
-  collection: any
+  collection: ^1.18.0
   meta: ^1.7.0
 
 dev_dependencies:
