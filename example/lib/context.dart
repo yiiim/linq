@@ -82,6 +82,7 @@ class TestContext extends LinqContext with _TestContextMixin implements LinqTran
   Future<int> count(String sql, List args) {
     sqlsHistory.add(sql);
     argsHistory.add(args);
+    print("SQL: $sql, Args: $args");
     return Future.value(database.select(sql, args).length);
   }
 
@@ -89,6 +90,7 @@ class TestContext extends LinqContext with _TestContextMixin implements LinqTran
   Future<List<Map<String, dynamic>>> query(String sql, List args) {
     sqlsHistory.add(sql);
     argsHistory.add(args);
+    print("SQL: $sql, Args: $args");
     return Future.value(database.select(sql, args));
   }
 
@@ -101,6 +103,7 @@ class TestContext extends LinqContext with _TestContextMixin implements LinqTran
   Future<int> execute(String sql, List args) {
     sqlsHistory.add(sql);
     argsHistory.add(args);
+    print("SQL: $sql, Args: $args");
     database.execute(sql, args);
     return Future.value(database.updatedRows);
   }

@@ -21,6 +21,8 @@ void main(List<String> arguments) async {
   context.add(student);
   await context.saveChanges();
   final query = await context.studentModel.where((e) => e.id.equalValue("1")).firstOrNull();
+  final select = await context.studentModel.select((e) => (e.age, e.name)).toList();
+  print(select);
   query!.update(
     (model) {
       model.age = 19;
