@@ -1030,7 +1030,7 @@ class _LinqEntitySet<T extends LinqModel> extends _LinqContextSet<T> {
 
   @override
   String fromSql() {
-    return "`${entity.tableName()}`";
+    return context.quoteIdentifier(entity.tableName());
   }
 }
 
@@ -1068,6 +1068,9 @@ abstract class LinqContext {
 
   @visibleForTesting
   List<String> prefixHistory = [];
+
+  String quoteIdentifier(String name) => "`$name`";
+  String parameterPlaceholder(int index) => "?";
 
   LinqEntity<T> modelEntity<T extends LinqModel>();
   LinqSet<T> entitySet<T extends LinqModel>() {
@@ -1113,7 +1116,7 @@ abstract class LinqContext {
         for (var insert in _inserts) {
           final fields = insert.entity.fields();
           final values = fields.map((e) => e.getDbValue(insert.object)).toList();
-          final sql = "INSERT INTO `${insert.entity.tableName()}` (${fields.map((e) => e.dbName).join(", ")}) VALUES (${fields.map((e) => "?").join(", ")})";
+          final sql = "INSERT INTO ${quoteIdentifier(insert.entity.tableName())} (${fields.map((e) => e.dbName).join(", ")}) VALUES (${fields.mapIndexed((i, e) => parameterPlaceholder(i + 1)).join(", ")})";
           futures.add(context.execute(sql, values));
         }
         for (var update in _updates) {
@@ -1126,13 +1129,18 @@ abstract class LinqContext {
               return e.getDbValue(update.object);
             },
           ).toList();
-          final sql = "UPDATE `${update.entity.tableName()}` SET ${fields.map((e) => "${e.field.dbName} = ?").join(", ")} WHERE ${primaryKeys.map((e) => "`${e.dbName}` = ?").join(" AND ")}";
+
+          int paramIndex = 1;
+          final setClause = fields.map((e) => "${e.field.dbName} = ${parameterPlaceholder(paramIndex++)}").join(", ");
+          final whereClause = primaryKeys.map((e) => "${quoteIdentifier(e.dbName)} = ${parameterPlaceholder(paramIndex++)}").join(" AND ");
+
+          final sql = "UPDATE ${quoteIdentifier(update.entity.tableName())} SET $setClause WHERE $whereClause";
           futures.add(context.execute(sql, [...values, ...whereValues]));
         }
         for (var delete in _deletes) {
           final primaryKeys = delete.entity.fields().where((element) => element.isPrimaryKey).toList();
           final values = primaryKeys.map((e) => e.getDbValue(delete.object)).toList();
-          final sql = "DELETE FROM `${delete.entity.tableName()}` WHERE ${primaryKeys.map((e) => "${e.dbName} = ?").join(" AND ")}";
+          final sql = "DELETE FROM ${quoteIdentifier(delete.entity.tableName())} WHERE ${primaryKeys.mapIndexed((i, e) => "${e.dbName} = ${parameterPlaceholder(i + 1)}").join(" AND ")}";
           futures.add(context.execute(sql, values));
         }
         final result = (await Future.wait(futures)).sum;
