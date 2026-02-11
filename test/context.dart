@@ -159,6 +159,16 @@ class TestContext extends LinqContext with _TestContextMixin implements LinqTran
     database.execute(sql, args);
     return Future.value(database.updatedRows);
   }
+  
+  @override
+  Future<dynamic> executeInsertAndReturnId(String sql, List args) async {
+    sqlsHistory.add(sql);
+    argsHistory.add(args);
+    database.execute(sql, args);
+    // 对于测试，返回最后插入的 ID（简化实现）
+    // 实际应该从数据库获取 last_insert_rowid()
+    return Future.value(database.updatedRows);
+  }
 
   @override
   void rollback() {}

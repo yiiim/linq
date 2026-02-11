@@ -126,7 +126,7 @@ String nextPrefix(String? prefix) {
 
 abstract class _LinqWhereValue {
   List get args;
-  String toSql({required String alias, LinqWhereLikeOperator? like});
+  String toSql({required String alias, LinqWhereLikeOperator? like, required ParameterPlaceholderProvider context, required int paramIndex});
 }
 
 class _LinqWhereConstantValue<T> extends _LinqWhereValue {
@@ -135,18 +135,19 @@ class _LinqWhereConstantValue<T> extends _LinqWhereValue {
   final DataFieldCodec? codec;
 
   @override
-  String toSql({required String alias, LinqWhereLikeOperator? like}) {
+  String toSql({required String alias, LinqWhereLikeOperator? like, required ParameterPlaceholderProvider context, required int paramIndex}) {
+    final placeholder = context.parameterPlaceholder(paramIndex);
     if (like != null) {
       switch (like) {
         case LinqWhereLikeOperator.start:
-          return "?%";
+          return "$placeholder%";
         case LinqWhereLikeOperator.end:
-          return "%?";
+          return "%$placeholder";
         case LinqWhereLikeOperator.both:
-          return "%?%";
+          return "%$placeholder%";
       }
     }
-    return "?";
+    return placeholder;
   }
 
   @override
@@ -158,9 +159,9 @@ class _LinqWhereConstantInValue<T> extends _LinqWhereValue {
   final List<T> value;
   final DataFieldCodec? codec;
   @override
-  String toSql({required String alias, LinqWhereLikeOperator? like}) {
+  String toSql({required String alias, LinqWhereLikeOperator? like, required ParameterPlaceholderProvider context, required int paramIndex}) {
     assert(like == null);
-    return "(${value.map((e) => "?").join(", ")})";
+    return "(${value.asMap().entries.map((e) => context.parameterPlaceholder(paramIndex + e.key)).join(", ")})";
   }
 
   @override
@@ -247,10 +248,10 @@ class _LinqQueryWhereField<T, E> extends LinqWherePropertyField<T, E> implements
       );
 
   @override
-  String toSql({required String alias, LinqWhereLikeOperator? like}) {
-    var valueSql = "`$alias`.`${field.dbName}`";
+  String toSql({required String alias, LinqWhereLikeOperator? like, required ParameterPlaceholderProvider context, required int paramIndex}) {
+    var valueSql = "${context.quoteIdentifier(alias)}.${context.quoteIdentifier(field.dbName)}";
     if (prefix?.isNotEmpty == true) {
-      valueSql = "`$alias`.`${prefix}_${field.dbName}`";
+      valueSql = "${context.quoteIdentifier(alias)}.${context.quoteIdentifier('${prefix}_${field.dbName}')}";
     }
     if (like != null) {
       switch (like) {
@@ -282,7 +283,7 @@ class _LinqQueryWhereOperator extends LinqWhere {
   _LinqWhereValue? right;
 
   @override
-  String toSql({required String alias}) {
+  String toSql({required String alias, required ParameterPlaceholderProvider context, int paramIndex = 1}) {
     final String operatorSql = switch (operator) {
       LinqWhereOperator.equal => "=",
       LinqWhereOperator.notEqual => "!=",
@@ -297,7 +298,11 @@ class _LinqQueryWhereOperator extends LinqWhere {
       LinqWhereOperator.isNull => "IS NULL",
       LinqWhereOperator.isNotNull => "IS NOT NULL",
     };
-    return "${left.toSql(alias: alias)} $operatorSql${right == null ? "" : " ${right!.toSql(alias: alias)}"}";
+    int currentIndex = paramIndex;
+    final leftSql = left.toSql(alias: alias, like: null, context: context, paramIndex: currentIndex);
+    currentIndex += left.args.length;
+    final rightSql = right == null ? "" : " ${right!.toSql(alias: alias, like: likeOperator, context: context, paramIndex: currentIndex)}";
+    return "$leftSql $operatorSql$rightSql";
   }
 
   @override
@@ -358,7 +363,7 @@ class _LinqQueryWhereMultiple extends LinqWhere {
   }
 
   @override
-  String toSql({required String alias}) {
+  String toSql({required String alias, required ParameterPlaceholderProvider context, int paramIndex = 1}) {
     assert(
       () {
         if (_items.isEmpty) {
@@ -382,15 +387,19 @@ class _LinqQueryWhereMultiple extends LinqWhere {
       }(),
     );
     StringBuffer sb = StringBuffer();
+    int currentIndex = paramIndex;
     for (var element in _items) {
-      sb.write(
-        switch (element) {
-          LinqWhere() => element.toSql(alias: alias),
-          LinqWhereJoinOperator.and => " AND ",
-          LinqWhereJoinOperator.or => " OR ",
-          _ => "",
-        },
-      );
+      final part = switch (element) {
+        LinqWhere() => () {
+          final sql = element.toSql(alias: alias, context: context, paramIndex: currentIndex);
+          currentIndex += element.args.length;
+          return sql;
+        }(),
+        LinqWhereJoinOperator.and => " AND ",
+        LinqWhereJoinOperator.or => " OR ",
+        _ => "",
+      };
+      sb.write(part);
     }
     return sb.toString();
   }
@@ -430,8 +439,8 @@ class _LinqQueryWhereGroup extends LinqWhere {
   }
 
   @override
-  String toSql({required String alias}) {
-    return "(${original.toSql(alias: alias)})";
+  String toSql({required String alias, required ParameterPlaceholderProvider context, int paramIndex = 1}) {
+    return "(${original.toSql(alias: alias, context: context, paramIndex: paramIndex)})";
   }
 
   @override
@@ -735,12 +744,13 @@ abstract class _LinqContextSet<T extends Object> extends LinqSet<T> implements Q
     if (where != null) {
       this.where(where);
     }
-    String sql = 'SELECT count(*) FROM ${fromSql()} AS $alias';
+    String sql = 'SELECT count(*) FROM ${fromSql()} AS ${context.quoteIdentifier(alias)}';
     if (_where != null) {
-      sql += ' WHERE ${_where!.toSql(alias: alias)}';
+      int whereParamIndex = _args.length + 1;
+      sql += ' WHERE ${_where!.toSql(alias: alias, context: context, paramIndex: whereParamIndex)}';
     }
     if (_orderBy != null) {
-      sql += ' ORDER BY $alias.`${_orderBy!.dbName}` ${_descending ? 'DESC' : 'ASC'}';
+      sql += ' ORDER BY ${context.quoteIdentifier(alias)}.${context.quoteIdentifier(_orderBy!.dbName)} ${_descending ? 'DESC' : 'ASC'}';
     }
     if (_take != null) {
       sql += ' LIMIT $_take';
@@ -778,12 +788,13 @@ abstract class _LinqContextSet<T extends Object> extends LinqSet<T> implements Q
 
   @override
   String toSql() {
-    String sql = 'SELECT ${fields.map((e) => "`$alias`.`${e.dbName}`").join(', ')} FROM ${fromSql()} AS `$alias`';
+    String sql = 'SELECT ${fields.map((e) => "${context.quoteIdentifier(alias)}.${context.quoteIdentifier(e.dbName)}").join(', ')} FROM ${fromSql()} AS ${context.quoteIdentifier(alias)}';
     if (_where != null) {
-      sql += ' WHERE ${_where!.toSql(alias: alias)}';
+      int whereParamIndex = _args.length + 1;
+      sql += ' WHERE ${_where!.toSql(alias: alias, context: context, paramIndex: whereParamIndex)}';
     }
     if (_orderBy != null) {
-      sql += ' ORDER BY `$alias`.`${_orderBy!.dbName}` ${_descending ? 'DESC' : 'ASC'}';
+      sql += ' ORDER BY ${context.quoteIdentifier(alias)}.${context.quoteIdentifier(_orderBy!.dbName)} ${_descending ? 'DESC' : 'ASC'}';
     }
     if (_take != null) {
       sql += ' LIMIT $_take';
@@ -947,30 +958,32 @@ class _LinqJoinSet<T extends Object, E extends Object, F, G extends Object> exte
     sb.write("(SELECT ");
     List<String> fields = [];
     for (var field in leftFields) {
-      fields.add("`$leftAlias`.`${field.dbName}` AS `${leftAlias}_${field.dbName}`");
+      fields.add("${context.quoteIdentifier(leftAlias)}.${context.quoteIdentifier(field.dbName)} AS ${context.quoteIdentifier('${leftAlias}_${field.dbName}')}");
     }
     for (var field in rightFields) {
-      fields.add("`$rightAlias`.`${field.dbName}` AS `${rightAlias}_${field.dbName}`");
+      fields.add("${context.quoteIdentifier(rightAlias)}.${context.quoteIdentifier(field.dbName)} AS ${context.quoteIdentifier('${rightAlias}_${field.dbName}')}");
     }
     sb.write(fields.join(", "));
-    sb.write(" FROM ${left.fromSql()} AS `$leftAlias` ");
+    sb.write(" FROM ${left.fromSql()} AS ${context.quoteIdentifier(leftAlias)} ");
     sb.write(switch (joinOn.type) {
       QueryJoinType.inner => "INNER JOIN",
       QueryJoinType.left => "LEFT JOIN",
       QueryJoinType.right => "RIGHT JOIN",
     });
-    sb.write(" ${right.fromSql()} AS `$rightAlias` ");
-    sb.write("ON `$leftAlias`.`${joinOn.left.dbName}` = `$rightAlias`.`${joinOn.right.dbName}`");
+    sb.write(" ${right.fromSql()} AS ${context.quoteIdentifier(rightAlias)} ");
+    sb.write("ON ${context.quoteIdentifier(leftAlias)}.${context.quoteIdentifier(joinOn.left.dbName)} = ${context.quoteIdentifier(rightAlias)}.${context.quoteIdentifier(joinOn.right.dbName)}");
     if (left._where != null || right._where != null) {
       sb.write(" WHERE ");
+      int currentParamIndex = _args.length + 1;
       if (left._where != null) {
-        sb.write(left._where!.toSql(alias: leftAlias));
+        sb.write(left._where!.toSql(alias: leftAlias, context: context, paramIndex: currentParamIndex));
+        currentParamIndex += left._where!.args.length;
       }
       if (right._where != null) {
         if (left._where != null) {
           sb.write(" AND ");
         }
-        sb.write(right._where!.toSql(alias: rightAlias));
+        sb.write(right._where!.toSql(alias: rightAlias, context: context, paramIndex: currentParamIndex));
       }
     }
     sb.write(")");
@@ -1036,13 +1049,25 @@ class _LinqEntitySet<T extends LinqModel> extends _LinqContextSet<T> {
 
 abstract class LinqTransactionContext {
   Future<int> execute(String sql, List args);
+  
+  /// 执行插入操作并返回自增主键的值
+  /// 对于不支持 RETURNING 的数据库，需要在实现中使用特定的方法获取最后插入的 ID
+  /// 返回值类型通常是 int 或 String，取决于数据库的主键类型
+  Future<dynamic> executeInsertAndReturnId(String sql, List args);
+  
   void rollback();
 }
 
 class _LinqContextInsertObject<T extends LinqModel> {
-  _LinqContextInsertObject(this.entity, this.object);
+  _LinqContextInsertObject(this.entity, this.object) {
+    // 缓存自增字段，避免重复查找
+    autoIncrementField = entity.fields().firstWhereOrNull(
+      (f) => f.isPrimaryKey && f.isAutoIncrement,
+    );
+  }
   final LinqEntity<T> entity;
   final T object;
+  QueryModelFieldDescriptor? autoIncrementField;
 }
 
 class _LinqContextUpdateObject<T extends LinqModel> {
@@ -1058,7 +1083,7 @@ class _LinqContextDeleteObject<T extends LinqModel> {
   final T object;
 }
 
-abstract class LinqContext {
+abstract class LinqContext implements ParameterPlaceholderProvider {
   String? _currentPrefix;
   String _nextPrefix() {
     _currentPrefix = nextPrefix(_currentPrefix);
@@ -1069,8 +1094,14 @@ abstract class LinqContext {
   @visibleForTesting
   List<String> prefixHistory = [];
 
+  @override
   String quoteIdentifier(String name) => "`$name`";
+  @override
   String parameterPlaceholder(int index) => "?";
+  
+  /// 是否支持在 INSERT 语句中使用 RETURNING 子句
+  /// PostgreSQL 支持，MySQL/SQLite 不支持
+  bool get supportsReturning => false;
 
   LinqEntity<T> modelEntity<T extends LinqModel>();
   LinqSet<T> entitySet<T extends LinqModel>() {
@@ -1113,11 +1144,37 @@ abstract class LinqContext {
     return transaction<int?>(
       (context) async {
         List<Future<int>> futures = [];
+        
+        // 处理插入操作
         for (var insert in _inserts) {
-          final fields = insert.entity.fields();
-          final values = fields.map((e) => e.getDbValue(insert.object)).toList();
-          final sql = "INSERT INTO ${quoteIdentifier(insert.entity.tableName())} (${fields.map((e) => e.dbName).join(", ")}) VALUES (${fields.mapIndexed((i, e) => parameterPlaceholder(i + 1)).join(", ")})";
-          futures.add(context.execute(sql, values));
+          final allFields = insert.entity.fields();
+          final autoIncrementField = insert.autoIncrementField;
+          
+          // 如果有自增字段，排除它
+          final fieldsToInsert = autoIncrementField != null
+              ? allFields.where((f) => f != autoIncrementField).toList()
+              : allFields;
+          
+          final values = fieldsToInsert.map((e) => e.getDbValue(insert.object)).toList();
+          
+          // 生成 INSERT SQL
+          String sql = "INSERT INTO ${quoteIdentifier(insert.entity.tableName())} (${fieldsToInsert.map((e) => quoteIdentifier(e.dbName)).join(", ")}) VALUES (${fieldsToInsert.mapIndexed((i, e) => parameterPlaceholder(i + 1)).join(", ")})";
+          
+          // 如果支持 RETURNING 且有自增字段，添加 RETURNING 子句
+          if (supportsReturning && autoIncrementField != null) {
+            sql += " RETURNING ${quoteIdentifier(autoIncrementField.dbName)}";
+          }
+          
+          // 执行插入并回填 ID
+          if (autoIncrementField != null) {
+            final insertedId = await context.executeInsertAndReturnId(sql, values);
+            if (insertedId != null) {
+              autoIncrementField.setDbValue(insert.object, insertedId);
+            }
+            futures.add(Future.value(1));
+          } else {
+            futures.add(context.execute(sql, values));
+          }
         }
         for (var update in _updates) {
           final fields = update.fields;
@@ -1131,7 +1188,7 @@ abstract class LinqContext {
           ).toList();
 
           int paramIndex = 1;
-          final setClause = fields.map((e) => "${e.field.dbName} = ${parameterPlaceholder(paramIndex++)}").join(", ");
+          final setClause = fields.map((e) => "${quoteIdentifier(e.field.dbName)} = ${parameterPlaceholder(paramIndex++)}").join(", ");
           final whereClause = primaryKeys.map((e) => "${quoteIdentifier(e.dbName)} = ${parameterPlaceholder(paramIndex++)}").join(" AND ");
 
           final sql = "UPDATE ${quoteIdentifier(update.entity.tableName())} SET $setClause WHERE $whereClause";
@@ -1140,7 +1197,7 @@ abstract class LinqContext {
         for (var delete in _deletes) {
           final primaryKeys = delete.entity.fields().where((element) => element.isPrimaryKey).toList();
           final values = primaryKeys.map((e) => e.getDbValue(delete.object)).toList();
-          final sql = "DELETE FROM ${quoteIdentifier(delete.entity.tableName())} WHERE ${primaryKeys.mapIndexed((i, e) => "${e.dbName} = ${parameterPlaceholder(i + 1)}").join(" AND ")}";
+          final sql = "DELETE FROM ${quoteIdentifier(delete.entity.tableName())} WHERE ${primaryKeys.mapIndexed((i, e) => "${quoteIdentifier(e.dbName)} = ${parameterPlaceholder(i + 1)}").join(" AND ")}";
           futures.add(context.execute(sql, values));
         }
         final result = (await Future.wait(futures)).sum;

@@ -1,5 +1,11 @@
 import 'annotation/linq.dart';
 
+// Interface for providing SQL dialect-specific functionality
+abstract class ParameterPlaceholderProvider {
+  String parameterPlaceholder(int index);
+  String quoteIdentifier(String name);
+}
+
 abstract class QueryDescriptor<T> {
   String toSql();
 }
@@ -14,6 +20,7 @@ class QueryModelFieldDescriptor<TModelType, TValueType> {
     required this.dbName,
     required this.defaultValue,
     this.isPrimaryKey = false,
+    this.isAutoIncrement = false,
     this.get,
     this.set,
     this.codec,
@@ -22,6 +29,7 @@ class QueryModelFieldDescriptor<TModelType, TValueType> {
   void Function(TModelType model, TValueType value)? set;
 
   final bool isPrimaryKey;
+  final bool isAutoIncrement;
   final String name;
   final String dbName;
   final DataFieldCodec? codec;
@@ -41,9 +49,10 @@ class QueryModelFieldDescriptor<TModelType, TValueType> {
     set!(model, codec?.decoder.convert(value) ?? value);
   }
 
-  QueryModelFieldDescriptor<TModelType, TValueType> copyWith({String? name, String? dbName, bool? isPrimaryKey}) {
+  QueryModelFieldDescriptor<TModelType, TValueType> copyWith({String? name, String? dbName, bool? isPrimaryKey, bool? isAutoIncrement}) {
     return QueryModelFieldDescriptor<TModelType, TValueType>(
       isPrimaryKey: isPrimaryKey ?? this.isPrimaryKey,
+      isAutoIncrement: isAutoIncrement ?? this.isAutoIncrement,
       name: name ?? this.name,
       dbName: dbName ?? this.dbName,
       defaultValue: defaultValue,
@@ -102,7 +111,7 @@ abstract class LinqWherePropertyField<T, E> {
 
 abstract class LinqWhere {
   List get args;
-  String toSql({required String alias});
+  String toSql({required String alias, required ParameterPlaceholderProvider context, int paramIndex = 1});
 
   LinqWhere group();
   LinqWhere and(LinqWhere other);

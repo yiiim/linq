@@ -23,12 +23,14 @@ class LinqColum {
   const LinqColum({
     this.colum,
     this.primaryKey = false,
+    this.autoIncrement = false,
     this.ignore = false,
     this.dbType,
     this.codec,
   }) : assert(dbType == null || codec != null, 'codec must be provided when dbType is provided');
   final String? colum;
   final bool primaryKey;
+  final bool autoIncrement;
   final Type? dbType;
   final DataFieldCodec? codec;
   final bool ignore;
